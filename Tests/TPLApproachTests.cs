@@ -8,8 +8,38 @@ namespace Tests
         public async void CanNotReadIfSomeoneWrites()
         {
             ReadWriteTPL r = new ReadWriteTPL();
-            var readTask = r.WriteAsync(2);
-            Assert.Null(await r.ReadAsync(0));
+            var writeTask = r.WriteAsync(2);
+            Assert.Equal(Status.Occupied, (await r.ReadAsync(0)).Status);
+        }
+
+        [Fact]
+        public void CanNotWriteManyIfWrites()
+        {
+            ReadWriteTPL r = new ReadWriteTPL();
+            Parallel.Invoke(
+                async () => Assert.Equal(Status.Success, await r.WriteAsync(2)),
+                async () => Assert.Equal(Status.Occupied, await r.WriteAsync(2)),
+                async () => Assert.Equal(Status.Occupied, await r.WriteAsync(2)));
+        }
+
+        [Fact]
+        public void CanNotWriteManyIfReads()
+        {
+            ReadWriteTPL r = new ReadWriteTPL();
+            Parallel.Invoke(
+                async () => Assert.Equal(Status.Success, (await r.ReadAsync(2)).Status),
+                async () => Assert.Equal(Status.Occupied, await r.WriteAsync(2)),
+                async () => Assert.Equal(Status.Occupied, await r.WriteAsync(2)));
+        }
+
+        [Fact]
+        public async void CanNotReadManyIfWrites()
+        {
+            ReadWriteTPL r = new ReadWriteTPL();
+            Parallel.Invoke(
+                async () => Assert.Equal(Status.Success, await r.WriteAsync(2)),
+                async () => Assert.Equal(Status.Occupied, (await r.ReadAsync(2)).Status),
+                async () => Assert.Equal(Status.Occupied, (await r.ReadAsync(2)).Status));
         }
 
         [Fact]
@@ -30,13 +60,19 @@ namespace Tests
         public async void CanNotWriteIfAtLeastOneStillReads()
         {
             ReadWriteTPL r = new ReadWriteTPL();
-            Task reader1 = r.ReadAsync(10);
-            Task reader2 = r.ReadAsync(20);
+            Task reader1 = new(() => { });
+            Task reader2 = new(() => { });
 
-            var status = await Task.Delay(15).ContinueWith(t => r.WriteAsync(5));
-            Assert.Equal(Status.Occupied, await status);
+            Parallel.Invoke(
+                () => reader1 = r.ReadAsync(10),
+                () => reader2 = r.ReadAsync(20),
+                async () =>
+                {
+                    var status = await Task.Delay(15).ContinueWith(t => r.WriteAsync(5));
+                    Assert.Equal(Status.Occupied, await status);
+                });
 
-            status = await Task.WhenAll(reader1, reader2).ContinueWith(t => r.WriteAsync(5));
+            var status = await Task.WhenAll(reader1, reader2).ContinueWith(t => r.WriteAsync(5));
             Assert.Equal(Status.Success, await status);
         }
 
@@ -52,7 +88,7 @@ namespace Tests
         public async void CanWriteWhenReadingFinished()
         {
             ReadWriteTPL r = new ReadWriteTPL();
-            string? content = await r.ReadAsync(2);
+            var readResult = await r.ReadAsync(2);
             Assert.Equal(Status.Success, await r.WriteAsync(0));
         }
 
@@ -62,14 +98,15 @@ namespace Tests
         public async void CanReadWhenWritingFinished(int readersCount)
         {
             ReadWriteTPL r = new ReadWriteTPL();
-            string? content;
+            ReadResult? content;
             string expected = "test";
             await r.WriteAsync(2, expected);
 
             for (int i = 0; i < readersCount; i++)
             {
                 content = await r.ReadAsync(1);
-                Assert.Equal(expected, content);
+                Assert.Equal(expected, content?.Content);
+                Assert.Equal(Status.Success, content?.Status);
                 content = null;
             }
         }
@@ -79,7 +116,9 @@ namespace Tests
         {
             ReadWriteTPL r = new ReadWriteTPL();
             await Assert.ThrowsAsync<ReadWriteException>(() => r.WriteAsync(2, "text", true));
-            Assert.Null(await r.ReadAsync(0));
+            var readResult = await r.ReadAsync(0);
+            Assert.Equal(Status.Success, readResult.Status);
+            Assert.Null(readResult.Content);
         }
 
         [Fact]

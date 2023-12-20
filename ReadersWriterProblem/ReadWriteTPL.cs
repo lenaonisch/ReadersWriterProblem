@@ -3,15 +3,24 @@
     public class ReadWriteTPL
     {
         private string? _source;
-        private bool _isWriting;
-        private int _readersCount;
+        Counters _counters;
+
+        public ReadWriteTPL()
+        {
+            _counters = new Counters();
+        }
+        class Counters { public bool IsWriting; public int ReadersCount; }
 
         public async Task<Status> WriteAsync(int duration, string? text = null, bool throwsEx = false)
         {
-            if (_readersCount > 0 || _isWriting)
-                return Status.Occupied;
+            lock (_counters)
+            {
+                if (_counters.ReadersCount > 0 || _counters.IsWriting)
+                    return Status.Occupied;
 
-            _isWriting = true;
+                _counters.IsWriting = true;
+            }
+
             return await Task.Delay(duration).ContinueWith(t =>
             {
 
@@ -26,18 +35,22 @@
                 catch { throw; }
                 finally
                 {
-                    _isWriting = false;
+                    _counters.IsWriting = false;
                 }
                 return Status.Success;
             });
         }
 
-        public async Task<string?> ReadAsync(int duration, bool throwsEx = false)
+        public async Task<ReadResult> ReadAsync(int duration, bool throwsEx = false)
         {
-            if (_isWriting)
-                return null;
+            lock (_counters)
+            {
+                if (_counters.IsWriting)
+                    return new ReadResult() { Status = Status.Occupied, Content = null };
 
-            _readersCount++;
+                _counters.ReadersCount++;
+            }
+
             return await Task.Delay(duration).ContinueWith(t =>
             {
                 try
@@ -50,13 +63,18 @@
                 catch { throw; }
                 finally
                 {
-                    _readersCount--;
+                    _counters.ReadersCount--;
                 }
-                return _source;
+                return new ReadResult() { Status = Status.Success, Content = _source };
             });
         }
     }
 
+    public struct ReadResult
+    {
+        public string? Content;
+        public Status Status;
+    }
     public enum Status
     {
         None = 0,
