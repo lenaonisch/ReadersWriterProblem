@@ -1,6 +1,6 @@
 ﻿namespace ReadersWriterProblem
 {
-    public class ReadWriteTPL
+    public class ReadWriteTPL: IReadWrite
     {
         private string? _source;
         Counters _counters;
@@ -9,16 +9,16 @@
         {
             _counters = new Counters();
         }
-        class Counters { public bool IsWriting; public int ReadersCount; }
+        public class Counters { public int WritersCount; public int ReadersCount; }
 
         public async Task<Status> WriteAsync(int duration, string? text = null, bool throwsEx = false)
         {
             lock (_counters)
             {
-                if (_counters.ReadersCount > 0 || _counters.IsWriting)
+                if (_counters.ReadersCount > 0 || _counters.WritersCount > 0)
                     return Status.Occupied;
 
-                _counters.IsWriting = true;
+                _counters.WritersCount++;
             }
 
             return await Task.Delay(duration).ContinueWith(t =>
@@ -35,7 +35,7 @@
                 catch { throw; }
                 finally
                 {
-                    _counters.IsWriting = false;
+                    _counters.WritersCount--;
                 }
                 return Status.Success;
             });
@@ -45,7 +45,7 @@
         {
             lock (_counters)
             {
-                if (_counters.IsWriting)
+                if (_counters.WritersCount > 0)
                     return new ReadResult() { Status = Status.Occupied, Content = null };
 
                 _counters.ReadersCount++;
