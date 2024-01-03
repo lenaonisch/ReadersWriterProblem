@@ -1,6 +1,6 @@
 ﻿namespace ReadersWriterProblem
 {
-    public class ReadWriteTPL : IReadWrite
+    public class ReadWriteTPL
     {
         string? _source;
         Counters _counters;

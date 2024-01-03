@@ -10,17 +10,21 @@ namespace ReadersWriterProblem
     ///5) Гарантировать запись/чтение
     ///6) опционально: добавить механизм отмены(ручной или авто) при невозможности записи/чтения за определённый промежуток времени
     /// </summary>
-    public class ReadWriteGuarantee : IReadWrite
+    public class ReadWriteGuarantee
     {
+        protected class OccupiedCounters : Counters
+        {
+            public bool IsOccupied = false; 
+        }
         protected string? _source;
-        protected Counters _counters;
-
+        protected OccupiedCounters _counters;
+        
         public ReadWriteGuarantee()
         {
-            _counters = new Counters();
+            _counters = new OccupiedCounters();
         }
 
-        public async Task<ReadResult> ReadAsync(int duration, bool throwsEx = false)
+        public async Task<ReadResult> ReadAsync(int duration, int? millisecondsTimeout = null, bool throwsEx = false)
         {
             Monitor.Enter(_counters);
             try
@@ -28,7 +32,11 @@ namespace ReadersWriterProblem
                 if (_counters.WritersCount > 0)
                 {
                     Monitor.Exit(_counters);
-                    SpinWait.SpinUntil(() => _counters.WritersCount == 0);
+                    var canRead = () => _counters.WritersCount == 0;
+                    if (millisecondsTimeout != null)
+                        SpinWait.SpinUntil(canRead, (int)millisecondsTimeout);
+                    else
+                        SpinWait.SpinUntil(canRead);
                 }
 
                 _counters.ReadersCount++;
@@ -39,6 +47,7 @@ namespace ReadersWriterProblem
                     Monitor.Exit(_counters);
             }
 
+            _counters.IsOccupied = true;
             return await Task.Delay(duration).ContinueWith(t =>
             {
                 try
@@ -52,23 +61,29 @@ namespace ReadersWriterProblem
                 finally
                 {
                     _counters.ReadersCount--;
+                    _counters.IsOccupied = false;
                 }
                 return new ReadResult() { Status = Status.Success, Content = _source };
             });
         }
 
-        public async Task<Status> WriteAsync(int duration, string? text = null, bool throwsEx = false)
+        public async Task<Status> WriteAsync(int duration, string text, int? millisecondsTimeout = null, bool throwsEx = false)
         {
             Monitor.Enter(_counters);
             try
             {
-                if (_counters.ReadersCount > 0 || _counters.WritersCount > 0)
+                _counters.WritersCount++;
+
+                if (_counters.WritersCount > 1)
                 {
+                    var canWrite = () => !_counters.IsOccupied && _counters.WritersCount == 1;
                     Monitor.Exit(_counters);
-                    SpinWait.SpinUntil(() => _counters.ReadersCount == 0 || _counters.WritersCount == 0);
+                    if (millisecondsTimeout != null)
+                        SpinWait.SpinUntil(canWrite, (int)millisecondsTimeout);
+                    else
+                        SpinWait.SpinUntil(canWrite);
                 }
 
-                _counters.WritersCount++;
             }
             finally
             {
@@ -76,9 +91,9 @@ namespace ReadersWriterProblem
                     Monitor.Exit(_counters);
             }
 
+            _counters.IsOccupied = true;
             return await Task.Delay(duration).ContinueWith(t =>
             {
-
                 try
                 {
                     if (throwsEx)
@@ -91,6 +106,7 @@ namespace ReadersWriterProblem
                 finally
                 {
                     _counters.WritersCount--;
+                    _counters.IsOccupied = false;
                 }
                 return Status.Success;
             });
