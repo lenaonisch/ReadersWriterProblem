@@ -12,20 +12,19 @@ namespace ReadersWriterProblem
     /// </summary>
     public class ReadWriteGuarantee
     {
-        protected class OccupiedCounters : Counters
-        {
-            public bool IsOccupied = false; 
-        }
         protected string? _source;
-        protected OccupiedCounters _counters;
-        
+        protected Counters _counters;
+        public int ReadersInQueue { get { return _counters.ReadersCount; } }
+        public int WritersInQueue { get { return _counters.WritersCount; } }
+
         public ReadWriteGuarantee()
         {
-            _counters = new OccupiedCounters();
+            _counters = new Counters();
         }
 
         public async Task<ReadResult> ReadAsync(int duration, int? millisecondsTimeout = null, bool throwsEx = false)
         {
+            //await Console.Out.WriteLineAsync($"read {duration} enter");
             Monitor.Enter(_counters);
             try
             {
@@ -47,7 +46,7 @@ namespace ReadersWriterProblem
                     Monitor.Exit(_counters);
             }
 
-            _counters.IsOccupied = true;
+            //await Console.Out.WriteLineAsync($"read {duration} start");
             return await Task.Delay(duration).ContinueWith(t =>
             {
                 try
@@ -61,14 +60,15 @@ namespace ReadersWriterProblem
                 finally
                 {
                     _counters.ReadersCount--;
-                    _counters.IsOccupied = false;
                 }
+                //Console.WriteLine($"read {duration} end");
                 return new ReadResult() { Status = Status.Success, Content = _source };
             });
         }
 
         public async Task<Status> WriteAsync(int duration, string text, int? millisecondsTimeout = null, bool throwsEx = false)
         {
+            //await Console.Out.WriteLineAsync($"write {duration} enter");
             Monitor.Enter(_counters);
             try
             {
@@ -76,7 +76,7 @@ namespace ReadersWriterProblem
 
                 if (_counters.WritersCount > 1)
                 {
-                    var canWrite = () => !_counters.IsOccupied && _counters.WritersCount == 1;
+                    var canWrite = () => _counters.WritersCount == 1;
                     Monitor.Exit(_counters);
                     if (millisecondsTimeout != null)
                         SpinWait.SpinUntil(canWrite, (int)millisecondsTimeout);
@@ -91,7 +91,7 @@ namespace ReadersWriterProblem
                     Monitor.Exit(_counters);
             }
 
-            _counters.IsOccupied = true;
+            //await Console.Out.WriteLineAsync($"write {duration} start");
             return await Task.Delay(duration).ContinueWith(t =>
             {
                 try
@@ -106,8 +106,8 @@ namespace ReadersWriterProblem
                 finally
                 {
                     _counters.WritersCount--;
-                    _counters.IsOccupied = false;
                 }
+                //Console.WriteLine("write {0} end", duration);
                 return Status.Success;
             });
         }
