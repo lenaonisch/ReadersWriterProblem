@@ -27,7 +27,7 @@ namespace Tests
         {
             ReadWriteTPL r = new ReadWriteTPL();
             Parallel.Invoke(
-                async () => Assert.Equal(Status.Success, (await r.ReadAsync(2)).Status),
+                async () => Assert.Equal(Status.Success, (await r.ReadAsync(10)).Status),
                 async () => Assert.Equal(Status.Occupied, await r.WriteAsync(2)),
                 async () => Assert.Equal(Status.Occupied, await r.WriteAsync(2)));
         }

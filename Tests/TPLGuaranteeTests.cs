@@ -5,7 +5,6 @@ namespace Tests
     public class TPLGuaranteeTests
     {
         /// <summary>
-        /// Reader initially occupies the source
         /// Then writer writes for 20ms. Two readers come and a writer with 5ms delay
         /// Test case checks that readers read after writers
         /// </summary>
@@ -21,10 +20,6 @@ namespace Tests
             };
 
             Parallel.Invoke(
-                async () =>
-                {
-                    Assert.Equal(Status.Success, (await r.ReadAsync(5)).Status);
-                },
                 async () =>
                 {
                     var status = r.WriteAsync(20, "a");
@@ -84,8 +79,11 @@ namespace Tests
                 {
                     Assert.Equal(0, r.ReadersInQueue);
                     Assert.Equal(0, r.WritersInQueue);
-                    await r.ReadAsync(20);
-                    Assert.Equal(0, r.WritersInQueue);
+                    var result = r.ReadAsync(20);
+                    Assert.Equal(1, r.ReadersInQueue);
+                    await result;
+                    Assert.Equal(0, r.ReadersInQueue);
+                    Assert.Equal(2, r.WritersInQueue);
                 }, // while reading for 20 ms, reader and 2 writers come
                 async () =>
                 {
@@ -104,6 +102,43 @@ namespace Tests
                     await Task.Delay(5).ContinueWith(t => r.WriteAsync(6, "a"));
                     Assert.Equal(1, r.ReadersInQueue);
                     Assert.Equal(1, r.WritersInQueue);
+                });
+        }
+
+        [Fact]
+        public void CancelReaderByTimeout()
+        {
+            ReadWriteGuarantee r = new ReadWriteGuarantee();
+
+            Parallel.Invoke(
+                async () =>
+                {
+                    await r.WriteAsync(20, "ab");
+                },
+                async () =>
+                {
+                    var result = await r.ReadAsync(0, 10);
+                    Assert.Equal(Status.Occupied, result.Status);
+                    Assert.Null(result.Content);
+                });
+        }
+
+
+        [Fact]
+        public void CancelWriterByTimeout()
+        {
+            ReadWriteGuarantee r = new ReadWriteGuarantee();
+
+            Parallel.Invoke(
+                async () =>
+                {
+                    await r.ReadAsync(2000);
+                    Assert.Equal(0, r.WritersInQueue);
+                },
+                async () =>
+                {
+                    var result = await Task.Delay(10).ContinueWith(t => r.WriteAsync(0, "ab", 50));
+                    Assert.Equal(Status.Occupied, await result);
                 });
         }
     }

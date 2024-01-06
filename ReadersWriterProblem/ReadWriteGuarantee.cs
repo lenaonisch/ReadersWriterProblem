@@ -13,32 +13,44 @@ namespace ReadersWriterProblem
     public class ReadWriteGuarantee
     {
         protected string? _source;
-        protected Counters _counters;
+        protected ReadingNowCounters _counters;
         public int ReadersInQueue { get { return _counters.ReadersCount; } }
         public int WritersInQueue { get { return _counters.WritersCount; } }
 
         public ReadWriteGuarantee()
         {
-            _counters = new Counters();
+            _counters = new ReadingNowCounters();
         }
+
+        public class ReadingNowCounters : Counters { public bool ReadingNow = false; }
 
         public async Task<ReadResult> ReadAsync(int duration, int? millisecondsTimeout = null, bool throwsEx = false)
         {
-            //await Console.Out.WriteLineAsync($"read {duration} enter");
+            bool canRead = true;
             Monitor.Enter(_counters);
             try
             {
                 if (_counters.WritersCount > 0)
                 {
                     Monitor.Exit(_counters);
-                    var canRead = () => _counters.WritersCount == 0;
+                    var readCondition = () => _counters.WritersCount == 0;
                     if (millisecondsTimeout != null)
-                        SpinWait.SpinUntil(canRead, (int)millisecondsTimeout);
+                        canRead = SpinWait.SpinUntil(readCondition, (int)millisecondsTimeout);
                     else
-                        SpinWait.SpinUntil(canRead);
+                        SpinWait.SpinUntil(readCondition);
                 }
 
-                _counters.ReadersCount++;
+                if (canRead)
+                {
+                    object rLock = new object();
+                    lock (rLock)
+                    {
+                        _counters.ReadersCount++;
+                        _counters.ReadingNow = true;
+                    }
+                }
+                else return new ReadResult() { Status = Status.Occupied };
+
             }
             finally
             {
@@ -46,7 +58,6 @@ namespace ReadersWriterProblem
                     Monitor.Exit(_counters);
             }
 
-            //await Console.Out.WriteLineAsync($"read {duration} start");
             return await Task.Delay(duration).ContinueWith(t =>
             {
                 try
@@ -60,29 +71,26 @@ namespace ReadersWriterProblem
                 finally
                 {
                     _counters.ReadersCount--;
+                    _counters.ReadingNow = false;
                 }
-                //Console.WriteLine($"read {duration} end");
                 return new ReadResult() { Status = Status.Success, Content = _source };
             });
         }
 
         public async Task<Status> WriteAsync(int duration, string text, int? millisecondsTimeout = null, bool throwsEx = false)
         {
-            //await Console.Out.WriteLineAsync($"write {duration} enter");
+            bool canWrite = true;
             Monitor.Enter(_counters);
             try
             {
                 _counters.WritersCount++;
 
-                if (_counters.WritersCount > 1)
-                {
-                    var canWrite = () => _counters.WritersCount == 1;
-                    Monitor.Exit(_counters);
-                    if (millisecondsTimeout != null)
-                        SpinWait.SpinUntil(canWrite, (int)millisecondsTimeout);
-                    else
-                        SpinWait.SpinUntil(canWrite);
-                }
+                var writeCondition = () => _counters.WritersCount == 1 && _counters.ReadingNow == false;
+                Monitor.Exit(_counters);
+                if (millisecondsTimeout != null)
+                    canWrite = SpinWait.SpinUntil(writeCondition, (int)millisecondsTimeout);
+                else
+                    SpinWait.SpinUntil(writeCondition);
 
             }
             finally
@@ -91,7 +99,15 @@ namespace ReadersWriterProblem
                     Monitor.Exit(_counters);
             }
 
-            //await Console.Out.WriteLineAsync($"write {duration} start");
+            if (!canWrite)
+            {
+                lock (_counters)
+                {
+                    _counters.WritersCount--;
+                }
+                return Status.Occupied;
+            }
+
             return await Task.Delay(duration).ContinueWith(t =>
             {
                 try
@@ -107,7 +123,6 @@ namespace ReadersWriterProblem
                 {
                     _counters.WritersCount--;
                 }
-                //Console.WriteLine("write {0} end", duration);
                 return Status.Success;
             });
         }
